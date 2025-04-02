@@ -18,7 +18,7 @@ def calculate_phash(image_paths, hash_size=8):
         image = Image.open(image_path).convert("L")
         
         # Step 2: Resize the image to (hash_size * 4, hash_size * 4) for better DCT accuracy
-        resized_image = image.resize((hash_size * 4, hash_size * 4), Image.ANTIALIAS)
+        resized_image = image.resize((hash_size * 4, hash_size * 4), Image.Resampling.LANCZOS)
         
         # Step 3: Convert the image to a numpy array
         pixel_array = np.array(resized_image, dtype=np.float32)
