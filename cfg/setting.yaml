@@ -2,9 +2,7 @@ train_path: "./imgs/"
 logs_path: "./logs/"
 checkpoints_path: "./checkpoints/"
 saved_models: "./saved_models"
-
 cuda: true
-
 exp_name: 2
 secret_size: 64
 num_steps: 100
@@ -44,4 +42,3 @@ contrast_ramp: 1000
 jpeg_quality_ramp: 1000
 no_im_loss_steps: 1500
 pretrained: None
-exp_name: experiment_1
