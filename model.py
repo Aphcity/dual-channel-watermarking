@@ -117,6 +117,13 @@ class Encoder2(nn.Module):
     
 
 class Encoder1(nn.Module):
+    """
+    The Encoder1 class defines a neural network module designed for encoding input
+    data with a series of convolutional and dense layers. It incorporates upsampling
+    and feature combination at multiple stages to process input data and generate
+    a modified output image with added residuals. This module is intended for tasks
+    requiring feature extraction and image transformation.
+    """
     def __init__(self):
         super(Encoder1, self).__init__()
         self.secret_dense = Dense(64, 256*256, activation='relu', kernel_initializer='he_normal')
@@ -245,6 +252,25 @@ class SpatialTransformerNetwork(nn.Module):
 
 
 class Decoder1(nn.Module):
+    """
+    A PyTorch neural network module designed to decode hidden secret data from
+    an input image.
+
+    This class leverages a spatial transformer network (STN) to transform the
+    input image, ensuring that the secret data remains recoverable under spatial
+    distortions and then passes the transformed image through a series of
+    convolutional layers and dense layers to decode secret data of the specified
+    size.
+
+    :ivar secret_size: Size of the secret data to be decoded.
+    :type secret_size: int
+    :ivar stn: Instance of the `SpatialTransformerNetwork` used to apply spatial
+        transformations to the input image.
+    :type stn: SpatialTransformerNetwork
+    :ivar decoder: Sequential model consisting of convolutional and dense layers
+        for extracting and decoding the secret data from the transformed image.
+    :type decoder: nn.Sequential
+    """
     def __init__(self, secret_size=64):
         super(Decoder1, self).__init__()
         self.secret_size = secret_size
