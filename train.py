@@ -85,7 +85,7 @@ def main():
     optimize_loss = optim.Adam(g_vars, lr=args.lr)
     optimize_secret_loss = optim.Adam(g_vars, lr=args.lr)
     optimize_dis = optim.RMSprop(d_vars, lr=0.00001)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimize_loss, gamma=0.999875)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimize_loss, gamma=0.99)
 
 
     height = 400
@@ -140,7 +140,7 @@ def main():
 
         extracted_hash = decoder2(reconstructed_residual)
 
-        latent_decoder = autoencoder.decoder(reconstructed_image)
+        latent_decoder = autoencoder.encoder(reconstructed_image)
         latent_decoder_np = latent_decoder.detach().cpu().numpy()
         sha3_hash_list_decoder = []
         for i in range(latent_decoder_np.shape[0]):
@@ -162,24 +162,24 @@ def main():
         lpips_loss_encoder = (lpips_alex(image_input, encoded_image).mean() + lpips_alex(encoded_image, image_input).mean())/2
         l2_loss_encoder = (torch.nn.functional.mse_loss(image_input, encoded_image) + torch.nn.functional.mse_loss(encoded_image, image_input))/2
 
+
         # LE2 = LR(E2) + LP(W2, I) + LC(I, W2).
         lpips_loss_encoder1 = (lpips_alex(image_input, final_encoded_image).mean() + lpips_alex(final_encoded_image, image_input).mean())/2
         l2_loss_encoder1 = (torch.nn.functional.mse_loss(image_input, final_encoded_image) + torch.nn.functional.mse_loss(final_encoded_image, image_input))/2
         
         # LD1 = LBCE(D1(W2), ph)
-        bce_loss_decoder = torch.nn.functional.binary_cross_entropy_with_logits(extracted_secret, secret_input)
+        bce_loss_decoder = (torch.nn.functional.binary_cross_entropy_with_logits(extracted_secret, secret_input)+torch.nn.functional.binary_cross_entropy_with_logits(secret_input, extracted_secret))/2
 
         # LD2 = L1(R,R') + LP (R,R') + MSE(R,R')
-        l1_loss_decoder1 = torch.nn.functional.l1_loss(reconstructed_residual, encoder1_output)
-        l2_loss_decoder1 = torch.nn.functional.mse_loss(reconstructed_residual, encoder1_output)
-        lpips_loss_decoder1 = lpips_alex(reconstructed_residual, encoder1_output).mean()
-        
-        D_loss = discriminator_loss(discriminator, final_encoded_image, image_input)
-        print(secret_input.shape)
+        l1_loss_decoder1 = (torch.nn.functional.l1_loss(reconstructed_residual, encoder1_output)+torch.nn.functional.l1_loss(encoder1_output, reconstructed_residual))/2
+        l2_loss_decoder1 = (torch.nn.functional.mse_loss(reconstructed_residual, encoder1_output)+torch.nn.functional.mse_loss(encoder1_output, reconstructed_residual))/2
+        lpips_loss_decoder1 = (lpips_alex(reconstructed_residual, encoder1_output).mean()+lpips_alex(encoder1_output, reconstructed_residual).mean())/2
 
         # LD3 = LBCE(D3(R'), h).
-        bce_loss_decoder2 = torch.nn.functional.binary_cross_entropy_with_logits(extracted_hash, sha3_hash_tensor_batch)
+        bce_loss_decoder2 = (torch.nn.functional.binary_cross_entropy_with_logits(torch.sigmoid(sha3_hash_tensor_batch_decoder), torch.sigmoid(sha3_hash_tensor_batch))+torch.nn.functional.binary_cross_entropy_with_logits(torch.sigmoid(sha3_hash_tensor_batch), torch.sigmoid(sha3_hash_tensor_batch_decoder)))/2
 
+        D_loss = discriminator_loss(discriminator, final_encoded_image, image_input)
+        print(secret_input.shape)
 
         # Weighting the losses
         w_l2_encoder = 1.0  
@@ -193,16 +193,33 @@ def main():
         w_bce_decoder2 = 1.0  
         w_discriminator = 0.1
 
+        # LE1 = LR(E1) + LP(W1, I) + LC(I, W1).
+        loss_encoder = w_l2_encoder * l2_loss_encoder + w_lpips_encoder * lpips_loss_encoder
+        # LE2 = LR(E2) + LP(W2, I) + LC(I, W2).
+        loss_encoder1 = w_l2_encoder1 * l2_loss_encoder1 + w_lpips_encoder1 * lpips_loss_encoder1
+        # LD1 = LBCE(D1(W2), ph)
+        loss_decoder = w_bce_decoder * bce_loss_decoder
+        # LD2 = L1(R,R') + LP (R,R') + MSE(R,R')
+        loss_decoder1 = w_l1_decoder1 * l1_loss_decoder1 + w_l2_decoder1 * l2_loss_decoder1 + w_lpips_decoder1 * lpips_loss_decoder1
+        # LD3 = LBCE(D3(R'), h).
+        loss_decoder2 = w_bce_decoder2 * bce_loss_decoder2
+
         total_loss = (
+            # LE1 = LR(E1) + LP(W1, I) + LC(I, W1).
             w_l2_encoder * l2_loss_encoder +
             w_lpips_encoder * lpips_loss_encoder +
+            # LE2 = LR(E2) + LP(W2, I) + LC(I, W2).
             w_l2_encoder1 * l2_loss_encoder1 +
             w_lpips_encoder1 * lpips_loss_encoder1 +
+            # LD1 = LBCE(D1(W2), ph)
             w_bce_decoder * bce_loss_decoder +
+            # LD2 = L1(R,R') + LP (R,R') + MSE(R,R')
             w_l1_decoder1 * l1_loss_decoder1 +
             w_l2_decoder1 * l2_loss_decoder1 +
             w_lpips_decoder1 * lpips_loss_decoder1 +
+            # LD3 = LBCE(D3(R'), h).
             w_bce_decoder2 * bce_loss_decoder2 +
+            # LD
             w_discriminator * D_loss
                 )
 
@@ -216,6 +233,11 @@ def main():
             optimize_dis.step()
 
         writer.add_scalar("loss/Total_Loss", total_loss.item(), global_step)
+        writer.add_scalar("loss/LE1_Loss_Encoder", loss_encoder.item(), global_step)
+        writer.add_scalar("loss/LE2_Loss_Encoder1", loss_encoder1.item(), global_step)
+        writer.add_scalar("loss/LD1_Loss_Decoder", loss_decoder.item(), global_step)
+        writer.add_scalar("loss/LD2_Loss_Decoder1", loss_decoder1.item(), global_step)
+        writer.add_scalar("loss/LD3_Loss_Decoder2", loss_decoder2.item(), global_step)
         # writer.add_scalar("loss/L2_Loss_Encoder", l2_loss_encoder.item(), global_step)
         # writer.add_scalar("loss/L2_Loss_Encoder1", l2_loss_encoder1.item(), global_step)
         # writer.add_scalar("loss/LPIPS_Loss_Encoder", lpips_loss_encoder.item(), global_step)
@@ -227,14 +249,16 @@ def main():
         # writer.add_scalar("loss/BCE_Loss_Decoder2", bce_loss_decoder2.item(), global_step)
         # writer.add_scalar("loss/Discriminator_Loss", D_loss.item(), global_step)
         writer.add_scalar("loss/Learning_Rate", scheduler.get_last_lr()[0], global_step)
-        # writer.add_scalar("loss/Random_Transform", rnd_tran, global_step)
+        writer.add_scalar("loss/Random_Transform", rnd_tran, global_step)
 
         global_step += 1
+        if global_step >= args.num_steps:
+            break
         if global_step == 1:
             print("Started training...")
         if global_step % 10 == 0:
             print(f"Step {global_step}, Total Loss: {total_loss.item():.4f}")
-        if global_step % 200 == 0:
+        if global_step % 30 == 0:
             torch.save(encoder, os.path.join(args.saved_models, "encoder.pth"))
             torch.save(encoder1, os.path.join(args.saved_models, "encoder1.pth"))
             torch.save(decoder, os.path.join(args.saved_models, "decoder.pth"))
@@ -244,11 +268,11 @@ def main():
         scheduler.step()
 
     writer.close()
-    # torch.save(encoder, os.path.join(args.saved_models, "encoder.pth"))
-    # torch.save(encoder1, os.path.join(args.saved_models, "encoder1.pth"))
-    # torch.save(decoder, os.path.join(args.saved_models, "decoder.pth"))
-    # torch.save(decoder1, os.path.join(args.saved_models, "decoder1.pth"))
-    # torch.save(decoder2, os.path.join(args.saved_models, "decoder2.pth"))
+    torch.save(encoder, os.path.join(args.saved_models, "encoder.pth"))
+    torch.save(encoder1, os.path.join(args.saved_models, "encoder1.pth"))
+    torch.save(decoder, os.path.join(args.saved_models, "decoder.pth"))
+    torch.save(decoder1, os.path.join(args.saved_models, "decoder1.pth"))
+    torch.save(decoder2, os.path.join(args.saved_models, "decoder2.pth"))
 
 
 if __name__ == '__main__':

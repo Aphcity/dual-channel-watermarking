@@ -107,11 +107,11 @@ def decode_image(encoded_image_path, encoder, encoder1, decoder, decoder1, decod
     return decoded_image_path
 
 if __name__ == "__main__":
-    encoder_path = "saved_models/encoder.pth"
-    encoder1_path = "saved_models/encoder1.pth"
-    decoder_path = "saved_models/decoder.pth"
-    decoder1_path = "saved_models/decoder1.pth"
-    decoder2_path = "saved_models/decoder2.pth"
+    encoder_path = "checkpoints/encoder.pth"
+    encoder1_path = "checkpoints/encoder1.pth"
+    decoder_path = "checkpoints/decoder.pth"
+    decoder1_path = "checkpoints/decoder1.pth"
+    decoder2_path = "checkpoints/decoder2.pth"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
