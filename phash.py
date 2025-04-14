@@ -1,7 +1,9 @@
+import PIL
 import numpy as np
 import cv2
+import torch
 from PIL import Image
-def calculate_phash(image_paths, hash_size=8):
+def calculate_phash(image_paths, hash_size=8, path=True):
     """
     Calculate the perceptual hash (pHash) of one or more images.
 
@@ -13,10 +15,13 @@ def calculate_phash(image_paths, hash_size=8):
         str or list: The perceptual hash as a hexadecimal string for a single image,
                      or a list of hexadecimal strings for multiple images.
     """
-    def process_image(image_path):
+    def process_image(image_path, istensor=False):
         # Step 1: Load the image and convert it to grayscale
-        image = Image.open(image_path).convert("L")
-        
+        if istensor:
+            image = image_path.convert("L")
+        else:
+            image = Image.open(image_path).convert("L")
+
         # Step 2: Resize the image to (hash_size * 4, hash_size * 4) for better DCT accuracy
         resized_image = image.resize((hash_size * 4, hash_size * 4), Image.Resampling.LANCZOS)
         
@@ -45,10 +50,14 @@ def calculate_phash(image_paths, hash_size=8):
     # Check if the input is a single image path or a list of paths
     if isinstance(image_paths, str):
         return process_image(image_paths)
+    # if image_paths is a tensor
+    elif isinstance(image_paths, list) and all(isinstance(image, PIL.Image.Image) for image in image_paths):
+        return [process_image(image, istensor=True) for image in image_paths]
     elif isinstance(image_paths, list):
         return [process_image(image_path) for image_path in image_paths]
     else:
         raise ValueError("image_paths must be a string or a list of strings.")
+
 
 # Example usage
 if __name__ == "__main__":

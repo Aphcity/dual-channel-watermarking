@@ -94,6 +94,7 @@ class Encoder2(nn.Module):
         secret = self.secret_dense(secret)
         secret = secret.view(-1, 1, 256, 256)
         secret_upsampled = nn.Upsample(size=(400, 400), mode='bilinear', align_corners=False)(secret)
+
         inputs = torch.cat([image, secret_upsampled], dim=1)
         conv1 = self.conv1(inputs)
         conv2 = self.conv2(conv1)
@@ -170,14 +171,17 @@ class Encoder1(nn.Module):
         conv8 = self.conv8(merge8)
         up9 = self.up9(nn.Upsample(scale_factor=(2, 2))(conv8))
         merge9 = torch.cat([conv1, up9, inputs], dim=1)
-        conv9=self.conv9(merge9)
+        conv9 = self.conv9(merge9)
         residual = self.residual(conv9)
-        output=image+residual
-        return output
+        # output=image+residual
+        return residual # residual of phash
 
 
-
+# FIXME: it is not correct at all, we need this decoder to extract a phash residual
 class Decoder2(nn.Module):
+    """
+    It will extract a residual from the image, which is the SHA3 hash of the image.
+    """
     def __init__(self):
         super(Decoder2, self).__init__()
 
@@ -200,7 +204,7 @@ class Decoder2(nn.Module):
         image = inputs
       
 
-       
+
 
         inputs = image
         conv1 = self.conv1(inputs)
@@ -253,23 +257,7 @@ class SpatialTransformerNetwork(nn.Module):
 
 class Decoder1(nn.Module):
     """
-    A PyTorch neural network module designed to decode hidden secret data from
-    an input image.
-
-    This class leverages a spatial transformer network (STN) to transform the
-    input image, ensuring that the secret data remains recoverable under spatial
-    distortions and then passes the transformed image through a series of
-    convolutional layers and dense layers to decode secret data of the specified
-    size.
-
-    :ivar secret_size: Size of the secret data to be decoded.
-    :type secret_size: int
-    :ivar stn: Instance of the `SpatialTransformerNetwork` used to apply spatial
-        transformations to the input image.
-    :type stn: SpatialTransformerNetwork
-    :ivar decoder: Sequential model consisting of convolutional and dense layers
-        for extracting and decoding the secret data from the transformed image.
-    :type decoder: nn.Sequential
+    It will extract the secret from the image, which is perceptual hash added to the image.
     """
     def __init__(self, secret_size=64):
         super(Decoder1, self).__init__()
@@ -332,6 +320,11 @@ class Discriminator(nn.Module):
         return output, x
 
 class Autoencoder(nn.Module):
+    """
+    TODO:
+        Autoencoder consists of an encoder part of a CNN-based pre-trained autoencoder with three layer each in encoder and decoder.
+        The autoencoder is trained for the reconstruction task using the Mirflickr dataset.
+    """
     def __init__(self, latent_dim=2048):
         super(Autoencoder, self).__init__()
         self.latent_dim = latent_dim
