@@ -127,9 +127,9 @@ class Encoder1(nn.Module):
     """
     def __init__(self):
         super(Encoder1, self).__init__()
-        self.secret_dense = Dense(64, 256*256, activation='relu', kernel_initializer='he_normal')
+        self.secret_dense = Dense(64, 256*256*3, activation='relu', kernel_initializer='he_normal')
 
-        self.conv1 = Conv2D(4, 32, 3, activation='relu')
+        self.conv1 = Conv2D(6, 32, 3, activation='relu')
         self.conv2 = Conv2D(32, 32, 3, activation='relu', strides=2)
         self.conv3 = Conv2D(32, 64, 3, activation='relu', strides=2)
         self.conv4 = Conv2D(64, 128, 3, activation='relu', strides=2)
@@ -141,7 +141,7 @@ class Encoder1(nn.Module):
         self.up8 = Conv2D(64, 32, 3, activation='relu')
         self.conv8 = Conv2D(64, 32, 3, activation='relu')
         self.up9 = Conv2D(32, 32, 3, activation='relu')
-        self.conv9 = Conv2D(68, 32, 3, activation='relu')
+        self.conv9 = Conv2D(70, 32, 3, activation='relu')
         self.residual = Conv2D(32, 3, 1, activation=None)
         
 
@@ -151,10 +151,10 @@ class Encoder1(nn.Module):
         image = image - .5
 
         secret = self.secret_dense(secret)
-        secret = secret.view(-1, 1, 256, 256)
+        secret = secret.reshape(-1, 3, 256, 256)
         secret_upsampled = nn.Upsample(size=(400, 400), mode='bilinear', align_corners=False)(secret)
 
-        inputs = torch.cat([image, secret_upsampled], dim=1)
+        inputs = torch.cat([secret_upsampled, image], dim=1)
         conv1 = self.conv1(inputs)
         conv2 = self.conv2(conv1)
         conv3 = self.conv3(conv2)

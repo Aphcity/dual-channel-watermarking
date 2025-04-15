@@ -70,27 +70,18 @@ def main():
     val_loader   = DataLoader(val_dataset,   batch_size=args.batch_size, num_workers=8, shuffle=False, pin_memory=True, drop_last=True)
 
     encoder = model.Encoder1()
-    encoder1= model.Encoder2()
     decoder = model.Decoder1(secret_size=64)
-    decoder1=model.Decoder2()
-    decoder2=model.Decoder3(secret_size=32)
     discriminator = model.Discriminator()
     lpips_alex = lpips.LPIPS(net="vgg", verbose=False)
     if args.cuda:
         encoder = encoder.cuda()
         decoder = decoder.cuda()
-        encoder1 = encoder1.cuda()
-        decoder1 = decoder1.cuda()
-        decoder2 = decoder2.cuda()
         discriminator = discriminator.cuda()
         lpips_alex.cuda()
 
     d_vars = discriminator.parameters()
     g_vars = [{'params': encoder.parameters()},
-              {'params': decoder.parameters()},
-              {'params': encoder1.parameters()},
-              {'params': decoder1.parameters()},
-              {'params': decoder2.parameters()}]
+              {'params': decoder.parameters()}]
 
     optimize_loss = optim.Adam(g_vars, lr=args.lr)
     optimize_secret_loss = optim.Adam(g_vars, lr=args.lr)
@@ -124,29 +115,9 @@ def main():
         writer.add_image("encode/ResidualPHash(R1)", residual_phash[0], global_step)
         writer.add_image("encode/FirstStage(W1)", image_firststage[0], global_step)
 
-        autoencoder = model.Autoencoder(latent_dim=2048)
-        if args.cuda:
-            autoencoder = autoencoder.cuda()
-        latent= autoencoder.encoder(image_firststage)
-
-        latent_np = latent.detach().cpu().numpy()
-        sha3_hash_list = []
-        for i in range(latent_np.shape[0]): 
-            single_latent = latent_np[i]  
-            sha3_hash = hashlib.sha3_256(single_latent.tobytes()).digest()  
-            sha3_hash_tensor = torch.tensor(list(sha3_hash), dtype=torch.float32).to(image_input.device)  # Convert to tensor
-            sha3_hash_list.append(sha3_hash_tensor)  
-        sha3_hash_tensor_batch = torch.stack(sha3_hash_list)
-
-        residual_sha3 = encoder1((sha3_hash_tensor_batch, image_firststage))
-        writer.add_image("encode/ResidualSHA3(R2)", residual_sha3[0], global_step)
-        image_secondstage = image_firststage + residual_sha3
-        writer.add_image("encode/SecondStage(W2)", image_secondstage[0], global_step)
-
-
         ## Random transform/ attack the image
 
-        image_transformed = model.transform_net(image_secondstage, args, global_step)
+        image_transformed = model.transform_net(image_firststage, args, global_step)
         image_transformed_pil = [transforms.ToPILImage()(img.squeeze().detach().cpu()) for img in image_transformed]
 
         ## Decoder Process
@@ -165,30 +136,12 @@ def main():
         if args.cuda:
             phash_decoded = phash_decoded.cuda()
         phash_bit_acc, phash_str_acc = model.get_secret_acc(extracted_secret, phash_decoded)
-        writer.add_scalar("acc/PHashBitAcc", phash_bit_acc, global_step)
-        writer.add_scalar("acc/PHashStrAcc", phash_str_acc, global_step)
+        writer.add_scalar("acc/ExtractedPHashBitAcc", phash_bit_acc, global_step)
+        writer.add_scalar("acc/ExtractedPHashStrAcc", phash_str_acc, global_step)
 
-
-        reconstructed_residual_sha3 = decoder1(image_secondstage)
-        reconstructed_image = image_secondstage - reconstructed_residual_sha3
-        writer.add_image("decode/ResidualSHA3(R2')", reconstructed_residual_sha3[0], global_step)
-        writer.add_image("decode/FirstStage(W1)", reconstructed_image[0], global_step)
-
-        extracted_hash = decoder2(reconstructed_residual_sha3)
-
-        latent_decoder = autoencoder.encoder(reconstructed_image)
-        latent_decoder_np = latent_decoder.detach().cpu().numpy()
-        sha3_hash_list_decoder = []
-        for i in range(latent_decoder_np.shape[0]):
-            single_latent_decoder = latent_decoder_np[i]
-            sha3_hash_decoder = hashlib.sha3_256(single_latent_decoder.tobytes()).digest()
-            sha3_hash_tensor_decoder = torch.tensor(list(sha3_hash_decoder), dtype=torch.float32).to(image_input.device)
-            sha3_hash_list_decoder.append(sha3_hash_tensor_decoder)
-        sha3_hash_tensor_batch_decoder = torch.stack(sha3_hash_list_decoder)
-
-        sha3_hash_bit_acc, sha3_hash_str_acc = model.get_secret_acc(extracted_hash, sha3_hash_tensor_batch_decoder)
-        writer.add_scalar("acc/SHA3BitAcc", sha3_hash_bit_acc, global_step)
-        writer.add_scalar("acc/SHA3StrAcc", sha3_hash_str_acc, global_step)
+        bit_acc, str_acc = model.get_secret_acc(secret_input, phash_decoded)
+        writer.add_scalar("acc/SecretBitAcc", bit_acc, global_step)
+        writer.add_scalar("acc/SecretStrAcc", str_acc, global_step)
 
         # Loss Calculation
         print("start loss calculation at step", global_step)
@@ -204,48 +157,22 @@ def main():
         l2_loss_encoder = (torch.nn.functional.mse_loss(image_input, image_firststage) + torch.nn.functional.mse_loss(image_firststage, image_input))/2
         lc_loss_encoder = discriminator_loss(discriminator, image_firststage, image_input)
 
-        # LE2 = LR(E2) + LP(W2, I) + LC(I, W2).
-        lpips_loss_encoder1 = (lpips_alex(image_input, image_secondstage).mean() + lpips_alex(image_secondstage, image_input).mean())/2
-        l2_loss_encoder1 = (torch.nn.functional.mse_loss(image_input, image_secondstage) + torch.nn.functional.mse_loss(image_secondstage, image_input))/2
-        lc_loss_encoder1 = discriminator_loss(discriminator, image_secondstage, image_input)
 
         # LD1 = LBCE(D1(W2), ph)
         bce_loss_decoder = (torch.nn.functional.binary_cross_entropy_with_logits(extracted_secret, secret_input)+torch.nn.functional.binary_cross_entropy_with_logits(secret_input, extracted_secret))/2
 
-        # LD2 = L1(R,R') + LP (R,R') + MSE(R,R')
-        l1_loss_decoder1 = (torch.nn.functional.l1_loss(reconstructed_residual_sha3, residual_sha3)+torch.nn.functional.l1_loss(residual_sha3, reconstructed_residual_sha3))/2
-        l2_loss_decoder1 = (torch.nn.functional.mse_loss(reconstructed_residual_sha3, residual_sha3)+torch.nn.functional.mse_loss(residual_sha3, reconstructed_residual_sha3))/2
-        lpips_loss_decoder1 = (lpips_alex(reconstructed_residual_sha3, residual_sha3).mean()+lpips_alex(residual_sha3, reconstructed_residual_sha3).mean())/2
-
-        # LD3 = LBCE(D3(R'), h).
-        bce_loss_decoder2 = (torch.nn.functional.binary_cross_entropy_with_logits(torch.sigmoid(sha3_hash_tensor_batch_decoder), torch.sigmoid(sha3_hash_tensor_batch))+torch.nn.functional.binary_cross_entropy_with_logits(torch.sigmoid(sha3_hash_tensor_batch), torch.sigmoid(sha3_hash_tensor_batch_decoder)))/2
-
-        # print(secret_input.shape)
-
         # Weighting the losses
         w_l2_encoder = 1.0
         w_lpips_encoder = 0.5
-        w_l2_encoder1 = 1.0
-        w_lpips_encoder1 = 0.5
         w_bce_decoder = 1.0
-        w_l1_decoder1 = 0.8
-        w_l2_decoder1 = 0.8
-        w_lpips_decoder1 = 0.5
-        w_bce_decoder2 = 1.0
         w_discriminator = 0.1
 
         # LE1 = LR(E1) + LP(W1, I) + LC(I, W1).
         loss_encoder = w_l2_encoder * l2_loss_encoder + w_lpips_encoder * lpips_loss_encoder + lc_loss_encoder * w_discriminator
-        # LE2 = LR(E2) + LP(W2, I) + LC(I, W2).
-        loss_encoder1 = w_l2_encoder1 * l2_loss_encoder1 + w_lpips_encoder1 * lpips_loss_encoder1 + lc_loss_encoder1 * w_discriminator
         # LD1 = LBCE(D1(W2), ph)
         loss_decoder = w_bce_decoder * bce_loss_decoder
-        # LD2 = L1(R,R') + LP (R,R') + MSE(R,R')
-        loss_decoder1 = w_l1_decoder1 * l1_loss_decoder1 + w_l2_decoder1 * l2_loss_decoder1 + w_lpips_decoder1 * lpips_loss_decoder1
-        # LD3 = LBCE(D3(R'), h).
-        loss_decoder2 = w_bce_decoder2 * bce_loss_decoder2
 
-        total_loss = loss_encoder + loss_encoder1 + loss_decoder + loss_decoder1 + loss_decoder2
+        total_loss = loss_encoder + loss_decoder
 
         if global_step < args.no_im_loss_steps:
             optimize_secret_loss.zero_grad()
@@ -258,25 +185,11 @@ def main():
             if not args.no_gan:
                 optimize_dis.zero_grad()
                 lc_loss_encoder.backward()
-                lc_loss_encoder1.backward()
                 optimize_dis.step()
 
         writer.add_scalar("loss/Total_Loss", total_loss.item(), global_step)
         writer.add_scalar("loss/LE1_Loss_Encoder", loss_encoder.item(), global_step)
-        writer.add_scalar("loss/LE2_Loss_Encoder1", loss_encoder1.item(), global_step)
         writer.add_scalar("loss/LD1_Loss_Decoder", loss_decoder.item(), global_step)
-        writer.add_scalar("loss/LD2_Loss_Decoder1", loss_decoder1.item(), global_step)
-        writer.add_scalar("loss/LD3_Loss_Decoder2", loss_decoder2.item(), global_step)
-        # writer.add_scalar("loss/L2_Loss_Encoder", l2_loss_encoder.item(), global_step)
-        # writer.add_scalar("loss/L2_Loss_Encoder1", l2_loss_encoder1.item(), global_step)
-        # writer.add_scalar("loss/LPIPS_Loss_Encoder", lpips_loss_encoder.item(), global_step)
-        # writer.add_scalar("loss/LPIPS_Loss_Encoder1", lpips_loss_encoder1.item(), global_step)
-        # writer.add_scalar("loss/BCE_Loss_Decoder", bce_loss_decoder.item(), global_step)
-        # writer.add_scalar("loss/L1_Loss_Decoder1", l1_loss_decoder1.item(), global_step)
-        # writer.add_scalar("loss/L2_Loss_Decoder1", l2_loss_decoder1.item(), global_step)
-        # writer.add_scalar("loss/LPIPS_Loss_Decoder1", lpips_loss_decoder1.item(), global_step)
-        # writer.add_scalar("loss/BCE_Loss_Decoder2", bce_loss_decoder2.item(), global_step)
-        # writer.add_scalar("loss/Discriminator_Loss", D_loss.item(), global_step)
         writer.add_scalar("loss/Learning_Rate", scheduler.get_last_lr()[0], global_step)
         writer.add_scalar("loss/Random_Transform", rnd_tran, global_step)
 
@@ -289,19 +202,13 @@ def main():
             print(f"Step {global_step}, Total Loss: {total_loss.item():.4f}")
         if global_step % 30 == 0:
             torch.save(encoder, os.path.join(args.saved_models, "encoder.pth"))
-            torch.save(encoder1, os.path.join(args.saved_models, "encoder1.pth"))
             torch.save(decoder, os.path.join(args.saved_models, "decoder.pth"))
-            torch.save(decoder1, os.path.join(args.saved_models, "decoder1.pth"))
-            torch.save(decoder2, os.path.join(args.saved_models, "decoder2.pth"))
 
         scheduler.step()
 
     writer.close()
     torch.save(encoder, os.path.join(args.saved_models, "encoder.pth"))
-    torch.save(encoder1, os.path.join(args.saved_models, "encoder1.pth"))
     torch.save(decoder, os.path.join(args.saved_models, "decoder.pth"))
-    torch.save(decoder1, os.path.join(args.saved_models, "decoder1.pth"))
-    torch.save(decoder2, os.path.join(args.saved_models, "decoder2.pth"))
 
 
 if __name__ == '__main__':
