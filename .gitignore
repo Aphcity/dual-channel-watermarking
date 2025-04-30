@@ -1,3 +1,8 @@
 __pycache__/
 logs/
 mirflickr/
+checkpoints/decoder.pth
+checkpoints/decoder1.pth
+checkpoints/decoder2.pth
+checkpoints/encoder.pth
+checkpoints/encoder1.pth
